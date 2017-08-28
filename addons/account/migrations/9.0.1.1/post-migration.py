@@ -570,6 +570,54 @@ def merge_invoice_journals(env, refund_journal_ids=None, journal_mapping=None):
                 })
 
 
+def fill_move_taxes_from_invoice(env):
+    # Invoice line Info
+    env.cr.execute(""" select ailt.invoice_line_id,tax_id,at.tax_code_id,
+                       at.ref_tax_code_id,at.base_code_id,at.ref_base_code_id,
+                       ail.account_id
+                       from account_invoice_line ail
+                       inner join account_invoice_line_tax  ailt
+                            on ailt.invoice_line_id=ail.id
+                       inner join account_tax at on ailt.tax_id=at.id
+                       """
+                   )
+    for row in env.cr.fetchall():
+        # TAX FEE
+        env.cr.execute(
+                     """select  aml.id
+                    from account_invoice_line ail
+                    inner join account_invoice ai on ail.invoice_id=ai.id
+                    inner join account_move am on ai.move_id=am.id
+                    inner join account_move_line aml on am.id=aml.move_id
+                    where ail.id=%(row_ailt)s and tax_code_id=%(tax_code_id)s
+                    """, {
+                      'row_ailt': row[0],
+                      'tax_code_id': row[2]},
+                      )
+        for row_aml in env.cr.fetchall():
+            openupgrade.logged_query(
+                env.cr,
+                """UPDATE account_move_line
+                SET tax_line_id = %s
+                WHERE id = %s""", (row[1], row_aml[0]))
+
+        env.cr.execute(
+                 """select  aml.id
+                from account_invoice_line ail
+                inner join account_invoice ai on ail.invoice_id=ai.id
+                inner join account_move am on ai.move_id=am.id
+                inner join account_move_line aml on am.id=aml.move_id
+                where ail.id=%(row_ailt)s and ail.account_id=aml.account_id
+                and aml.balance<>0 and tax_code_id is not null
+                """, {
+                    'row_ailt': row[0],
+                    },
+                )
+        for row_aml in env.cr.fetchall():
+            amls = env['account.move.line'].browse(row_aml[0])
+            amls.write({'tax_ids': [(4, row[1])]})
+
+
 @openupgrade.migrate(use_env=True)
 def migrate(env, version):
     cr = env.cr
@@ -658,6 +706,7 @@ def migrate(env, version):
     map_account_tax_type(cr)
     map_account_tax_template_type(cr)
     migrate_account_auto_fy_sequence(env)
+    fill_move_taxes_from_invoice(env)
     fill_blacklisted_fields(cr)
     reset_blacklist_field_recomputation()
     fill_move_line_invoice(cr)
