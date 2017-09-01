@@ -574,7 +574,7 @@ def fill_move_taxes_from_invoice(env):
     # Invoice line Info
     env.cr.execute(""" select ailt.invoice_line_id,tax_id,at.tax_code_id,
                        at.ref_tax_code_id,at.base_code_id,at.ref_base_code_id,
-                       ail.account_id
+                       ail.account_id,at.account_id
                        from account_invoice_line ail
                        inner join account_invoice_line_tax  ailt
                             on ailt.invoice_line_id=ail.id
@@ -589,10 +589,10 @@ def fill_move_taxes_from_invoice(env):
                     inner join account_invoice ai on ail.invoice_id=ai.id
                     inner join account_move am on ai.move_id=am.id
                     inner join account_move_line aml on am.id=aml.move_id
-                    where ail.id=%(row_ailt)s and tax_code_id=%(tax_code_id)s
+                    where ail.id=%(row_ailt)s and aml.account_id=%(account_id)s
                     """, {
                       'row_ailt': row[0],
-                      'tax_code_id': row[2]},
+                      'account_id': row[7]},
                       )
         for row_aml in env.cr.fetchall():
             openupgrade.logged_query(
@@ -608,11 +608,12 @@ def fill_move_taxes_from_invoice(env):
                 inner join account_move am on ai.move_id=am.id
                 inner join account_move_line aml on am.id=aml.move_id
                 where ail.id=%(row_ailt)s and ail.account_id=aml.account_id
-                and aml.balance<>0 and tax_code_id is not null
+                and aml.balance<>0 and ail.name=aml.name
                 """, {
                     'row_ailt': row[0],
                     },
                 )
+
         for row_aml in env.cr.fetchall():
             amls = env['account.move.line'].browse(row_aml[0])
             amls.write({'tax_ids': [(4, row[1])]})
